@@ -1,0 +1,27 @@
+Net-CIMD version 0.01
+=====================
+
+Net::CIMD implement Computer Interface to Message Distribution, which's a protocol used to exchange messages betweeb Service Providers and SMS Centers.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module is pure perl implementation, and requires no other modules or libraries.
+
+COPYRIGHT AND LICENCE
+
+Copyright (C) 2013 by Badr Zarhri <badr.zarhri@gmail.com>
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.8 or,
+at your option, any later version of Perl 5 you may have available.
+
+
