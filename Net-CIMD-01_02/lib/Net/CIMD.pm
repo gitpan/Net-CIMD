@@ -6,6 +6,8 @@
 # Writing this module in perl makes it independant of other packages (it requires only a working perl installation).
 # This module was tested in perl 5.8.8 (redhat EL 5), and 5.16.3 (centos 6.3).
 # Please feel free to contact me if you've any remarks or ideas to improve this work.
+# 23-June-2013, Created the module -- Badr
+# 27-June-2013, fixed decode RE to handle nack --Badr
 
 package Net::CIMD;
 
@@ -37,7 +39,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.01';
+our $VERSION = '0.01_02';
 
 
 my $trace = 0;
@@ -194,16 +196,6 @@ sub AUTOLOAD {
 	return "Ok";
 }
 
-sub encode_optional_params {
-	my %args=@_;
-	my $res="";
-	foreach (sort { parameter->{$a} <=> parameter->{$b} } keys %args)
-	{
-		$res.=parameter->{$_}.":".$args{$_}."\t";
-	}
-	return $res;
-}
-
 sub encode_packet {
 	my $me=shift;
 	my $op=shift;
@@ -214,13 +206,14 @@ sub encode_packet {
         {
                 $res.=parameter->{$_}.":".$args{$_}."\t" if(defined parameter->{$_});
         }
-        return $res.&checksum($res)."\x03";	
+        return $res.&checksum($res)."\x03";
+	#return $res."\x03";
 }
 
 sub decode_packet {
 	my $me=shift;
 	my $data=shift;
-	return undef unless($data =~ /^\x02([^:]+):([^\x09]+)\x09(.*\x09)(..)?\x03/);
+	return undef unless($data =~ /^\x02([^:]+):([^\x09]+)\x09(.*\x09)?(..)?\x03/);
 	my ($op, $seq)=($1, $2);
 	$data=$3;
 	my $checksum=$4;
@@ -241,6 +234,7 @@ sub read_sync()
 {
 	my $me=shift;
 	my $req=$me->decode_packet($me->receive_packet());
+	print "received :\n".Dumper($req);
 	$me->send_packet($me->encode_packet($req->{"operation"}."_resp",'seq', $req->{"sequence"})) if defined (operation->{$req->{"operation"}."_resp"});
 	return $req;
 }
@@ -314,7 +308,6 @@ Create a new CIMD client object and open conncetion to SMSC host
 It first establish a connexion with the server, and then send the credentials.
 
 =head1 METHODS
-
 Although current version supports only client mode, all CIMD operations are already implemented
 
 =over
