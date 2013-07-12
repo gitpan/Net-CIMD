@@ -1,4 +1,4 @@
-Net-CIMD version 0.01
+Net-CIMD version 0.01_03
 =====================
 
 Net::CIMD implement Computer Interface to Message Distribution, which's a protocol used to exchange messages betweeb Service Providers and SMS Centers.

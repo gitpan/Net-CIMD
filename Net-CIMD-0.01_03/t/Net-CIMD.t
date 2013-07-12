@@ -5,8 +5,10 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 1;
-BEGIN { use_ok('Net::CIMD') };
+use Test;
+BEGIN { plan tests => 1 };
+use Net::CIMD;
+ok(1); # If we made it this far, we're ok.
 
 #########################
 

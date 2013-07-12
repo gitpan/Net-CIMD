@@ -8,6 +8,8 @@
 # Please feel free to contact me if you've any remarks or ideas to improve this work.
 # 23-June-2013, Created the module -- Badr
 # 27-June-2013, fixed decode RE to handle nack --Badr
+# 11-July-2013, added server support -- Badr
+# 12-July-2013, added 7bit encoding functions -- Badr
 
 package Net::CIMD;
 
@@ -29,7 +31,7 @@ our @ISA = qw(Exporter);
 # This allows declaration	use Net::CIMD ':all';
 # If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
 # will save memory.
-our %EXPORT_TAGS = ( 'all' => [ qw(
+our %EXPORT_TAGS = ( 'all' => [ qw( pack_7bit unpack_7bit
 	
 ) ] );
 
@@ -39,7 +41,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.01_02';
+our $VERSION = '0.01_03';
 
 
 my $trace = 0;
@@ -48,8 +50,8 @@ my %inv_par;
 use constant Defaults => {
 	host	=>	"127.0.0.1",
 	port => 9971,
-	local_ip => "127.0.0.1",
-	timeout => 30
+	timeout => 300,
+	queue_size	=>	120
 };
 # CIMD interface specification 3.5 operation codes
 use constant operation => {
@@ -137,7 +139,6 @@ sub new_connect {
 	my %parms=(
          PeerAddr  => exists $arg{host} ? $arg{host} : Defaults->{host},
          PeerPort  => exists $arg{port} ? $arg{port} : Defaults->{port},
-         LocalAddr => exists $arg{local_ip} ? $arg{local_ip} : Defaults->{local_ip},
          Proto     => 'tcp',
          Timeout   => exists $arg{timeout} ? $arg{timeout} : Defaults->{timeout} );
     my $s = IO::Socket::INET->new(%parms)  # pass any extra args to constructor
@@ -218,7 +219,7 @@ sub decode_packet {
 	$data=$3;
 	my $checksum=$4;
 	my %parms;
-	$data =~ s/([^:]+):([^\x09]+)\x09/$parms{$inv_par{$1}}=$2/eg;
+	$data =~ s/([^:]+):([^\x09]*)\x09/$parms{$inv_par{$1}}=$2/eg if(defined $data);
 	return bless {"operation", $inv_op{$op}, "sequence", $seq, %parms}, 'Net::CIMD::PDU';
 }
 
@@ -234,20 +235,80 @@ sub read_sync()
 {
 	my $me=shift;
 	my $req=$me->decode_packet($me->receive_packet());
-	print "received :\n".Dumper($req);
 	$me->send_packet($me->encode_packet($req->{"operation"}."_resp",'seq', $req->{"sequence"})) if defined (operation->{$req->{"operation"}."_resp"});
 	return $req;
+}
+sub read_async()
+{
+	my $me=shift;
+        return $me->decode_packet($me->receive_packet());
 }
 sub DESTROY
 {
 	my $me=shift;
 	$me->logout();
 }
+
+# Server commands
+sub listen {
+	my $type=shift;
+	$type=ref($type) || $type;
+	my %arg=@_;
+	my %parms=(
+        Listen  => exists $arg{queue_size} ? $arg{queue_size} : Defaults->{queue_size},
+        LocalPort  => exists $arg{port} ? $arg{port} : Defaults->{port},
+        Proto     => 'tcp',
+        ReuseAddr => 'true',
+        );
+	return Net::CIMD::Listener->new(%parms);
+}
+
+sub pack_7bit {
+    my ($s) = @_;
+    $s = unpack 'b*', $s;
+    $s =~ s/(.{7})./$1/g;    # Zap the high order (8th) bits
+    $s= pack 'b*', $s;
+	$s=unpack("H*", $s);
+	return uc($s);
+}
+
+sub unpack_7bit {
+    my ($s) = @_;
+	$s=pack("H*", $s);
+    $s = unpack 'b*', $s;
+    $s =~ s/(.{7})/${1}0/g;  # Stuff in high order (8th) bits
+    $s = pack 'b*', $s;
+    chop $s if substr($s, -1, 1) eq "\x00";
+    return $s;
+}
+
 package Net::CIMD::PDU;
 sub new
 {
 	my $class=shift;
 	return bless {@_}, $class;
+}
+
+package Net::CIMD::Listener;
+use Carp;
+
+sub new {
+	my $type=shift;
+	$type=ref($type) || $type;
+	print "Listening : ".join(";", @_)." ...\n";
+	my $s = IO::Socket::INET->new(@_) or croak "Can't Listen $! $@\n";
+        return undef unless defined $s;
+        $s->autoflush(1);
+        return bless {'listener'	=>	$s}, $type;
+}
+sub accept {
+	my $self=shift;
+	my $tunnel = $self->{'listener'}->accept();
+	return bless {
+                seq     =>      "002",
+                buffer  =>      "",
+                tunnel  =>      $tunnel
+                }, 'Net::CIMD';
 }
 
 1;
@@ -435,6 +496,10 @@ This method receives a raw packet from network connexion, decodes it into Net::C
 
 	my $pdu=$cimd->read_sync();
 
+=item read_async()
+
+Similar to read_sync(), except that it doesn't send any response.
+
 =head1 OTHER METHODS
 
 Some other useful methods that doesn't require a connexion to an SMSC are also available.
@@ -449,6 +514,15 @@ It was separated from reading from the stream, so it can be used for other sourc
 	my $pdu=$cimd->decode_packet($var);
 or
 	my $pdu=Net::CIMD->decode_packet($var);
+
+=item pack_7bit()
+
+This function is used to calculate GSM7bit encoding of a ASCII coded string.
+Special characters encoding is still missing. Actually, it encodes only characters that have the same value in ASCII and GSM7Bits.
+
+=item unpack_7bit()
+
+This function is used to convert text from GSM7bits encoding to ASCII.
 
 =head1 EXAMPLES
 
@@ -492,6 +566,92 @@ Typical client:
 	
 	print Dumper($resp)."\n";
 
+=back
+
+Typical server:
+
+=over
+
+	#!/bin/env perl
+	use Net::CIMD qw(pack_7bit unpack_7bit);
+	use Data::Dumper;
+	
+	use constant tunnel_file => '/tmp/ttt';
+	use constant reply_tab  =>      {
+	        'login' =>      sub     {
+	                        my ($server, $pdu)=@_;
+	                        $server->login_resp();
+	                        },
+	        'submit'        =>      sub     {
+	                        my ($server, $pdu)=@_;
+	                        $server->submit_resp(
+	                        destination_address     =>      $pdu->{destination_address},
+	                        service_centre_time_stamp       =>      &now()
+				);
+	                        },
+	        'logout'        =>      sub     {
+	                        my ($server, $pdu)=@_;
+	                        $server->logout_resp();
+	                        },
+	        'deliver_message_resp'  =>      sub     {}
+	};
+	
+	my $listener=Net::CIMD->listen(
+	                                queue_size      =>      120,
+	                                port    =>      51050,
+	                                timeout =>      300);
+	print Dumper($listener)."\n";
+	
+	my $server=$listener->accept();
+	
+	print Dumper($server)."\n";
+	
+	my $pid=fork;
+	
+	if($pid==0)
+	{
+	        my $resp=$server->read_async();
+	        while($resp->{operation})
+	        {
+	                print Dumper($resp)."\n";
+	                &{reply_tab->{$resp->{operation}}}($server, $resp);
+	                $resp=$server->read_async();
+	        }
+	}
+	else
+	{
+	        while(1)
+	        {
+		#your logic for sending messages goes here.
+		# For example, we check the existence of a file containing the message
+	                if(-w tunnel_file)
+	                {
+	                        open FH, tunnel_file;
+	                        while(chomp($_=<FH>))
+	                        {
+	                        @_=split /\|/;
+	                        $server->deliver_message(
+	                        destination_address     =>      $_[0],
+	                        originating_address     =>      $_[1],
+	                        user_data       =>      pack_7bit($_[2]),
+	                        service_centre_time_stamp       =>      &now()
+	                        );
+	                        }
+	                        close FH;
+	                        unlink tunnel_file;
+	                }
+	                sleep 1;
+	        }
+	}
+	sub now {
+	        @_=localtime(time());
+	        @_=reverse @_[0..5];
+	        $_[1]++;
+	        $_[0]+=1900;
+	        return sprintf("%d%02d%02d%02d%02d%02d", @_);
+	}
+	
+	
 =head1 Limitations
 
 Current version supports only client mode.

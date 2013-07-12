@@ -1,0 +1,6 @@
+Revision history for Perl extension Net::CIMD.
+
+0.01_03  Fri Jul 12 21:43:52 2013
+	- original version; created by h2xs 1.23 with options
+		-An Net::CIMD -b 5.0.0008
+
